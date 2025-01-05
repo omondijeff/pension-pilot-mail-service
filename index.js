@@ -202,7 +202,7 @@ app.post("/send", async (req, res) => {
       }
     }
 
-    const { to, subject, body } = req.body;
+    const { to, subject, body, replyTo } = req.body;
     console.log("Sending email:", { to, subject });
 
     const info = await transporter.sendMail({
@@ -210,6 +210,13 @@ app.post("/send", async (req, res) => {
       to,
       subject,
       text: body,
+      replyTo: replyTo || "noreply@pension-pilot.co.uk",
+      returnPath: "bounces@pension-pilot.co.uk",
+      headers: {
+        "List-Unsubscribe": "<mailto:unsubscribe@pension-pilot.co.uk>",
+        "X-Mailer": "Pension Pilot Mail Service",
+        Precedence: "bulk",
+      },
     });
 
     console.log("Email sent successfully:", {
