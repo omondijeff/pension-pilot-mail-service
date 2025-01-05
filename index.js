@@ -11,7 +11,11 @@ let connectionStatus = "Not initialized";
 // Enable CORS and JSON parsing
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://pension-pilot.co.uk"],
+    origin: [
+      "http://localhost:5173",
+      "https://pension-pilot.co.uk",
+      "https://www.pension-pilot.co.uk",
+    ],
   })
 );
 app.use(express.json());
