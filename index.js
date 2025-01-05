@@ -90,7 +90,7 @@ app.get("/", async (req, res) => {
         <div class="min-h-screen flex flex-col items-center justify-center p-4">
             <div class="max-w-lg w-full bg-gray-800 rounded-lg shadow-lg p-8 mb-8">
                 <div class="flex justify-center mb-6">
-                    <img src="public/images/logo-pension-pilot.png" alt="Pension Pilot Logo" class="h-16">
+                    <img src="https://www.pension-pilot.co.uk/assets/logo-pension-pilot-CpOZGJ54.png" alt="Pension Pilot Logo" class="h-16">
                 </div>
                 <div class="text-center">
                     <h1 class="text-3xl font-bold text-white mb-4">Mail Service Status</h1>
