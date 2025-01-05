@@ -48,6 +48,9 @@ async function initializeTransporter() {
       },
       debug: true, // Enable debug logs
       logger: true, // Log to console
+      tls: {
+        rejectUnauthorized: false, // Disable SSL certificate verification (for troubleshooting only)
+      },
     });
 
     // Verify the connection
