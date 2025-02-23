@@ -19,6 +19,7 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "https://pension-pilot.co.uk",
   "https://www.pension-pilot.co.uk",
+  "https://mail.pension-pilot.co.uk",
 ];
 
 // SMTP configuration
@@ -31,7 +32,7 @@ const SMTP_CONFIG = {
   defaultReplyTo: "noreply@pension-pilot.co.uk",
 };
 
-// Middleware configuration
+// Enable CORS and JSON parsing
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
@@ -64,8 +65,11 @@ async function initializeTransporter(retryCount = 0) {
         user: SMTP_CONFIG.user,
         pass: process.env.EMAIL_PASSWORD,
       },
+      connectionTimeout: 10000, // sets timeout to 10 seconds
+      debug: true, // Enable debug logs
+      logger: true, // Log to console
       tls: {
-        rejectUnauthorized: true, // Enable SSL certificate verification in production
+        rejectUnauthorized: true, // Enable SSL certificate verification
         minVersion: "TLSv1.2", // Enforce minimum TLS version
       },
     });
@@ -86,9 +90,7 @@ async function initializeTransporter(retryCount = 0) {
 
     if (retryCount < serviceState.maxReconnectAttempts) {
       console.log(
-        `Retry attempt ${retryCount + 1} of ${
-          serviceState.maxReconnectAttempts
-        }`
+        `Retry attempt ${retryCount + 1} of ${serviceState.maxReconnectAttempts}`
       );
       await new Promise((resolve) =>
         setTimeout(resolve, 5000 * (retryCount + 1))
@@ -139,7 +141,7 @@ async function sendEmail(options) {
   }
 
   const emailConfig = {
-    from: '"Pension Pilot" <${SMTP_CONFIG.user}>',
+    from: `"Pension Pilot" <${SMTP_CONFIG.user}>`,
     to: options.to,
     subject: options.subject,
     text: options.body,
@@ -218,94 +220,6 @@ app.post("/send", async (req, res) => {
     });
   }
 });
-
-// Generate status page HTML
-function generateStatusPage(data) {
-  return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Pension Pilot Mail Service Status</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-900">
-        <div class="min-h-screen flex flex-col items-center justify-center p-4">
-            <div class="max-w-lg w-full bg-gray-800 rounded-lg shadow-lg p-8 mb-8">
-                <div class="flex justify-center mb-6">
-                    <img src="https://www.pension-pilot.co.uk/assets/logo-pension-pilot-CpOZGJ54.png" alt="Pension Pilot Logo" class="h-16">
-                </div>
-                <div class="text-center">
-                    <h1 class="text-3xl font-bold text-white mb-4">Mail Service Status</h1>
-                    
-                    <div class="flex items-center justify-center mb-6">
-                        <div class="h-6 w-6 ${
-                          data.isConnected ? "bg-green-500" : "bg-red-500"
-                        } rounded-full mr-2 animate-pulse"></div>
-                        <span class="${
-                          data.isConnected ? "text-green-400" : "text-red-400"
-                        } font-medium text-xl">
-                            Status: ${data.currentStatus}
-                        </span>
-                    </div>
-                    
-                    <div class="bg-gray-700 rounded p-6 mb-6">
-                        <p class="text-gray-300 mb-2">
-                            <span class="font-medium text-blue-400">SMTP Host:</span> ${
-                              SMTP_CONFIG.host
-                            }
-                        </p>
-                        <p class="text-gray-300 mb-2">
-                            <span class="font-medium text-blue-400">Port:</span> ${
-                              SMTP_CONFIG.port
-                            }
-                        </p>
-                        <p class="text-gray-300">
-                            <span class="font-medium text-blue-400">From:</span> ${
-                              SMTP_CONFIG.user
-                            }
-                        </p>
-                    </div>
-
-                    ${
-                      data.errorMessage
-                        ? `
-                    <div class="bg-red-800 rounded p-4 mb-6">
-                        <p class="text-red-300">Error: ${data.errorMessage}</p>
-                    </div>
-                    `
-                        : ""
-                    }
-
-                    <div class="bg-blue-800 rounded p-4 mb-6">
-                        <p class="text-blue-300 mb-2">
-                            <span class="font-medium">Environment:</span> ${
-                              data.environment
-                            }
-                        </p>
-                        <p class="text-blue-300">
-                            <span class="font-medium">Password Set:</span> ${
-                              data.passwordSet ? "Yes" : "No"
-                            }
-                        </p>
-                    </div>
-
-                    <p class="text-gray-400 text-sm mb-4">
-                        Last checked: ${
-                          data.lastChecked?.toLocaleString() || "Never"
-                        }
-                    </p>
-                    
-                    <button onclick="location.reload()" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 transition duration-150 ease-in-out">
-                        Retry Connection
-                    </button>
-                </div>
-            </div>
-            <p class="text-gray-500 text-sm">Powered by Pension Pilot</p>
-        </div>
-    </body>
-    </html>`;
-}
 
 // Start server
 const PORT = process.env.PORT || 3000;
