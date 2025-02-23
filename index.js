@@ -15,6 +15,7 @@ app.use(
       "http://localhost:5173",
       "https://pension-pilot.co.uk",
       "https://www.pension-pilot.co.uk",
+      "https://mail.pension-pilot.co.uk",
     ],
   })
 );
@@ -50,6 +51,7 @@ async function initializeTransporter() {
         user: "noreply@pension-pilot.co.uk",
         pass: process.env.EMAIL_PASSWORD,
       },
+      connectionTimeout: 10000, // sets timeout to 10 seconds
       debug: true, // Enable debug logs
       logger: true, // Log to console
       tls: {
@@ -202,7 +204,7 @@ app.post("/send", async (req, res) => {
     if (!transporter) {
       transporter = await initializeTransporter();
       if (!transporter) {
-        throw new Error("Mail service not initialized");
+        throw new Error("Mail service not initialized....");
       }
     }
 
