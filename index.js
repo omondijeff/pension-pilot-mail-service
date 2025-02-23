@@ -5,71 +5,100 @@ require("dotenv").config();
 
 const app = express();
 
-let lastError = null;
-let connectionStatus = "Not initialized";
+// Service state
+const serviceState = {
+  lastError: null,
+  connectionStatus: "Not initialized",
+  lastCheck: null,
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 5,
+};
+
+// Allowed origins configuration
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "https://pension-pilot.co.uk",
+  "https://www.pension-pilot.co.uk",
+  "https://mail.pension-pilot.co.uk",
+];
+
+// SMTP configuration
+const SMTP_CONFIG = {
+  host: "mail.privateemail.com",
+  port: 465,
+  secure: true,
+  user: "noreply@pension-pilot.co.uk",
+  bounceAddress: "bounces@pension-pilot.co.uk",
+  defaultReplyTo: "noreply@pension-pilot.co.uk",
+};
 
 // Enable CORS and JSON parsing
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "https://pension-pilot.co.uk",
-      "https://www.pension-pilot.co.uk",
-      "https://mail.pension-pilot.co.uk",
-    ],
-  })
-);
+app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
-// Function to create and verify transporter
-async function initializeTransporter() {
+// Validate environment variables
+function validateConfig() {
+  const requiredVars = ["EMAIL_PASSWORD"];
+  const missingVars = requiredVars.filter((varName) => !process.env[varName]);
+
+  if (missingVars.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missingVars.join(", ")}`
+    );
+  }
+}
+
+// Create and verify transporter with retry logic
+async function initializeTransporter(retryCount = 0) {
   try {
+    validateConfig();
+
     console.log("Initializing mail transporter...");
-    connectionStatus = "Initializing...";
-
-    if (!process.env.EMAIL_PASSWORD) {
-      const error = new Error("EMAIL_PASSWORD environment variable is not set");
-      lastError = error;
-      throw error;
-    }
-
-    console.log("Creating transporter with config:", {
-      host: "mail.privateemail.com",
-      port: 465,
-      secure: true,
-      auth: {
-        user: "noreply@pension-pilot.co.uk",
-        // password is hidden for security
-      },
-    });
+    serviceState.connectionStatus = "Initializing...";
+    serviceState.lastCheck = new Date();
 
     const transporter = nodemailer.createTransport({
-      host: "mail.privateemail.com",
-      port: 465,
-      secure: true,
+      host: SMTP_CONFIG.host,
+      port: SMTP_CONFIG.port,
+      secure: SMTP_CONFIG.secure,
       auth: {
-        user: "noreply@pension-pilot.co.uk",
+        user: SMTP_CONFIG.user,
         pass: process.env.EMAIL_PASSWORD,
       },
       connectionTimeout: 10000, // sets timeout to 10 seconds
       debug: true, // Enable debug logs
       logger: true, // Log to console
       tls: {
-        rejectUnauthorized: false, // Disable SSL certificate verification (for troubleshooting only)
+        rejectUnauthorized: true, // Enable SSL certificate verification
+        minVersion: "TLSv1.2", // Enforce minimum TLS version
       },
     });
 
-    // Verify the connection
     console.log("Verifying connection...");
     await transporter.verify();
+
     console.log("SMTP connection verified successfully");
-    connectionStatus = "Connected";
-    lastError = null;
+    serviceState.connectionStatus = "Connected";
+    serviceState.lastError = null;
+    serviceState.reconnectAttempts = 0;
+
     return transporter;
   } catch (error) {
+    serviceState.lastError = error;
+    serviceState.connectionStatus = "Failed";
+    serviceState.reconnectAttempts = retryCount + 1;
+
+    if (retryCount < serviceState.maxReconnectAttempts) {
+      console.log(
+        `Retry attempt ${retryCount + 1} of ${serviceState.maxReconnectAttempts}`
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, 5000 * (retryCount + 1))
+      );
+      return initializeTransporter(retryCount + 1);
+    }
+
     console.error("Failed to initialize mail transporter:", error);
-    lastError = error;
-    connectionStatus = "Failed";
     return null;
   }
 }
@@ -80,109 +109,61 @@ initializeTransporter().then((t) => {
   transporter = t;
 });
 
-// Status page route
+// Status page route with enhanced security headers
 app.get("/", async (req, res) => {
-  const isConnected = transporter !== null;
-  const currentStatus = connectionStatus;
-  const errorMessage = lastError?.message || "";
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains"
+  );
 
-  const html = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Pension Pilot Mail Service Status</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-900">
-        <div class="min-h-screen flex flex-col items-center justify-center p-4">
-            <div class="max-w-lg w-full bg-gray-800 rounded-lg shadow-lg p-8 mb-8">
-                <div class="flex justify-center mb-6">
-                    <img src="https://www.pension-pilot.co.uk/assets/logo-pension-pilot-CpOZGJ54.png" alt="Pension Pilot Logo" class="h-16">
-                </div>
-                <div class="text-center">
-                    <h1 class="text-3xl font-bold text-white mb-4">Mail Service Status</h1>
-                    
-                    <div class="flex items-center justify-center mb-6">
-                        <div class="h-6 w-6 ${
-                          isConnected ? "bg-green-500" : "bg-red-500"
-                        } rounded-full mr-2 animate-pulse"></div>
-                        <span class="${
-                          isConnected ? "text-green-400" : "text-red-400"
-                        } font-medium text-xl">
-                            Status: ${currentStatus}
-                        </span>
-                    </div>
-                    
-                    <div class="bg-gray-700 rounded p-6 mb-6">
-                        <p class="text-gray-300 mb-2">
-                            <span class="font-medium text-blue-400">SMTP Host:</span> mail.privateemail.com
-                        </p>
-                        <p class="text-gray-300 mb-2">
-                            <span class="font-medium text-blue-400">Port:</span> 465
-                        </p>
-                        <p class="text-gray-300">
-                            <span class="font-medium text-blue-400">From:</span> noreply@pension-pilot.co.uk  
-                        </p>
-                    </div>
+  const statusData = {
+    isConnected: transporter !== null,
+    currentStatus: serviceState.connectionStatus,
+    errorMessage: serviceState.lastError?.message || "",
+    environment: process.env.NODE_ENV || "development",
+    lastChecked: serviceState.lastCheck,
+    passwordSet: !!process.env.EMAIL_PASSWORD,
+  };
 
-                    ${
-                      errorMessage
-                        ? `
-                    <div class="bg-red-800 rounded p-4 mb-6">
-                        <p class="text-red-300">Error: ${errorMessage}</p>
-                    </div>
-                    `
-                        : ""
-                    }
-
-                    <div class="bg-blue-800 rounded p-4 mb-6">
-                        <p class="text-blue-300 mb-2">
-                            <span class="font-medium">Environment:</span> ${
-                              process.env.NODE_ENV || "development"
-                            }
-                        </p>
-                        <p class="text-blue-300">
-                            <span class="font-medium">Password Set:</span> ${
-                              process.env.EMAIL_PASSWORD ? "Yes" : "No"
-                            }
-                        </p>
-                    </div>
-
-                    <p class="text-gray-400 text-sm mb-4">
-                        Last checked: ${new Date().toLocaleString()}
-                    </p>
-                    
-                    <button onclick="location.reload()" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 transition duration-150 ease-in-out">
-                        Retry Connection
-                    </button>
-                </div>
-            </div>
-            <p class="text-gray-500 text-sm">Powered by Pension Pilot</p>
-        </div>
-    </body>
-    </html>
-  `;
-
+  const html = generateStatusPage(statusData);
   res.send(html);
 });
 
-// Send email test endpoint
+// Email sending function with validation
+async function sendEmail(options) {
+  if (!transporter) {
+    transporter = await initializeTransporter();
+    if (!transporter) {
+      throw new Error("Mail service not initialized");
+    }
+  }
+
+  const emailConfig = {
+    from: `"Pension Pilot" <${SMTP_CONFIG.user}>`,
+    to: options.to,
+    subject: options.subject,
+    text: options.body,
+    replyTo: options.replyTo || SMTP_CONFIG.defaultReplyTo,
+    returnPath: SMTP_CONFIG.bounceAddress,
+    headers: {
+      "List-Unsubscribe": "<mailto:unsubscribe@pension-pilot.co.uk>",
+      "X-Mailer": "Pension Pilot Mail Service",
+      Precedence: "bulk",
+    },
+  };
+
+  return await transporter.sendMail(emailConfig);
+}
+
+// Test email endpoint
 app.post("/test-email", async (req, res) => {
   try {
-    if (!transporter) {
-      transporter = await initializeTransporter();
-      if (!transporter) {
-        throw new Error("Mail service not initialized");
-      }
-    }
-
-    const testInfo = await transporter.sendMail({
-      from: '"Pension Pilot" <noreply@pension-pilot.co.uk>',
-      to: "noreply@pension-pilot.co.uk", // Send to self as test
+    const testInfo = await sendEmail({
+      to: SMTP_CONFIG.user,
       subject: "Mail Service Test",
-      text: "This is a test email from the Pension Pilot mail service.",
+      body: "This is a test email from the Pension Pilot mail service.",
     });
 
     res.json({
@@ -198,32 +179,27 @@ app.post("/test-email", async (req, res) => {
   }
 });
 
-// Regular email sending endpoint
+// Regular email sending endpoint with input validation
 app.post("/send", async (req, res) => {
   try {
-    if (!transporter) {
-      transporter = await initializeTransporter();
-      if (!transporter) {
-        throw new Error("Mail service not initialized....");
-      }
+    const { to, subject, body, replyTo } = req.body;
+
+    // Basic input validation
+    if (!to || !subject || !body) {
+      throw new Error(
+        "Missing required fields: to, subject, and body are required"
+      );
     }
 
-    const { to, subject, body, replyTo } = req.body;
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(to)) {
+      throw new Error("Invalid email address format");
+    }
+
     console.log("Sending email:", { to, subject });
 
-    const info = await transporter.sendMail({
-      from: '"Pension Pilot" <noreply@pension-pilot.co.uk>',
-      to,
-      subject,
-      text: body,
-      replyTo: replyTo || "noreply@pension-pilot.co.uk",
-      returnPath: "bounces@pension-pilot.co.uk",
-      headers: {
-        "List-Unsubscribe": "<mailto:unsubscribe@pension-pilot.co.uk>",
-        "X-Mailer": "Pension Pilot Mail Service",
-        Precedence: "bulk",
-      },
-    });
+    const info = await sendEmail({ to, subject, body, replyTo });
 
     console.log("Email sent successfully:", {
       messageId: info.messageId,
